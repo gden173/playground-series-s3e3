@@ -5,3 +5,4 @@ sklearn
 catboost
 xgboost 
 lightgbm
+optuna
