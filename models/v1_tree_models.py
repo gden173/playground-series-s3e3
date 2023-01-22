@@ -13,8 +13,10 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import sklearn as sk
 from sklearn.model_selection import train_test_split
+from sklearn.model_selection import GridSearchCV
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import roc_auc_score
 import xgboost as xgb
 import lightgbm as gb
 import catboost as cb
@@ -51,7 +53,9 @@ def submit(
     """
 
     # TODO: Add error handling
-    pd.DataFrame({"id": id_col, "attrition": attrition_col}).to_csv(submission_name)
+    pd.DataFrame({"id": id_col, "attrition": attrition_col}).to_csv(
+        submission_name, index=False
+    )
 
     return None
 
@@ -79,7 +83,7 @@ def str_2_cat(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # %%
-def to_one_hot(df: pd.DataFrame) -> pd.DataFrame:
+def to_one_hot(df: pd.DataFrame, encoder: OneHotEncoder = None) -> pd.DataFrame:
     """Converts a pandas dataframe categorical features
     to one hot encoding
 
@@ -90,14 +94,15 @@ def to_one_hot(df: pd.DataFrame) -> pd.DataFrame:
         pd.DataFrame:
     """
 
-    encoder = OneHotEncoder(
-        drop="if_binary",
-        sparse=False,
-        handle_unknown="infrequent_if_exist",  # Don't want to error on the test set
-    )
+    if encoder is None:
+        encoder = OneHotEncoder(
+            drop="if_binary",
+            sparse=False,
+            handle_unknown="infrequent_if_exist",  # Don't want to error on the test set
+        )
 
-    # Note: this creates columns with spaces 
-    # might have to change this 
+    # Note: this creates columns with spaces
+    # might have to change this
     df_cat = pd.DataFrame(
         encoder.fit_transform(df.select_dtypes(exclude=np.number)),
         columns=encoder.get_feature_names_out(),
@@ -145,7 +150,7 @@ test_df = read_data(file_path="test.csv", data_path="data")
 train_df.shape
 
 # %% Exploratory Data Analysis
-train_df = to_one_hot(train_df)
+train_df, enc = to_one_hot(train_df)
 
 
 # %%
@@ -157,23 +162,45 @@ x_train, x_test, y_train, y_test = get_train_test_split(
     shuffle=True,
 )
 
+
+# %%
+def get_best_model(classifier, param_grid: dict):
+    """Runs grid search CV to obtain the best model
+    using the provided parameter dictionary
+
+    Args:
+        classifier (_type_): Implements the sklearn interface
+        param_grid (dict): parameter dictionary
+    """
+    clf = GridSearchCV(classifier, param_grid=param_grid)
+
+
 # %%
 # Fit Light GBM
+
 lgbm = gb.LGBMClassifier()
 lgbm.fit(x_train, y_train)
-lgbm.score(x_test, y_test)
+
+# %%
+probs = lgbm.predict_proba(x_test)[:, 1]
+roc_auc_score(y_test.values.reshape(-1), probs)
+
 
 #%%
 # Fit CatBoost
 cbc = cb.CatBoostClassifier()
 cbc.fit(x_train, y_train)
-cbc.score(x_test, y_test)
+probs = cbc.predict_proba(x_test)[:, 1]
+roc_auc_score(y_test.values.reshape(-1), probs)
+
 
 
 # %% Random Forrest
 rf = RandomForestClassifier()
 rf.fit(x_train, y_train)
-rf.score(x_test, y_test)
+probs = rf.predict_proba(x_test)[:, 1]
+roc_auc_score(y_test.values.reshape(-1), probs)
+
 
 
 # %%
@@ -186,4 +213,7 @@ xg.score(x_test, y_test)
 
 # %%
 # Submit Prediction
-submit()
+pred_df, _ = to_one_hot(test_df, encoder=enc)
+submit(pred_df.id.values, lgbm.predict(pred_df))
+
+# %%
